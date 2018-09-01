@@ -35,6 +35,7 @@ let update context =
 
 [<EntryPoint>]
 let main argv =
+    printf "%s" argv.[0]
     match argv.Length with
     | 0 -> printf "Please specify bot token as an argument."
     | _ ->
