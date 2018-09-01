@@ -6,22 +6,26 @@ open Funogram.Bot
 open Funogram.Types
 open FSharp.Data
 open ExtCore.Control
+open Funogram.RequestsTypes
 
 [<Literal>]
-let API_URL = "http://aws.random.cat/meow"
-type CatsApi = JsonProvider<API_URL>
+let ApiUrl = "http://aws.random.cat/meow"
+type CatsApi = JsonProvider<ApiUrl>
+
+let execute context method =
+    method
+    |> api context.Config
+    |> Async.Ignore
+    |> Async.Start
 
 let onMeow context =
     maybe {
-        let json = API_URL |> CatsApi.Load
+        let json = ApiUrl |> CatsApi.Load
         
         let! message = context.Update.Message
-        let file = new Uri(json.File) |> FileToSend.Url
-        
-        sendPhoto message.Chat.Id file ""
-        |> api context.Config
-        |> Async.Ignore
-        |> Async.Start
+        let file = Uri json.File |> FileToSend.Url
+
+        sendPhoto message.Chat.Id file "" |> execute context
     } |> ignore
     
 let update context = 
