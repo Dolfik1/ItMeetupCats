@@ -1,0 +1,1 @@
+sudo docker build -t itmeetupcats . && sudo docker run -it itmeetupcats
