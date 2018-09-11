@@ -18,14 +18,22 @@ let execute context method =
     |> Async.Ignore
     |> Async.Start
 
+let cast f = upcast f : IRequestBase<'a>
+
 let onMeow context =
     maybe {
         let json = ApiUrl |> CatsApi.Load
         
         let! message = context.Update.Message
-        let file = Uri json.File |> FileToSend.Url
+        let file = Uri json.File |> FileToSend.Url        
 
-        sendPhoto message.Chat.Id file "" |> execute context
+        let sendCat id file =
+            if json.File.EndsWith ".gif" then
+                sendDocument id file "" |> cast
+            else
+                sendPhoto id file "" |> cast
+
+        sendCat message.Chat.Id file |> execute context
     } |> ignore
     
 let update context = 
