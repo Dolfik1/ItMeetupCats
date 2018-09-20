@@ -13,28 +13,32 @@ let ApiUrl = "http://aws.random.cat/meow"
 type CatsApi = JsonProvider<ApiUrl>
 
 let execute context method =
-    method
-    |> api context.Config
-    |> Async.Ignore
+    method |> api context.Config 
+    |> Async.Ignore 
     |> Async.Start
 
 let cast f = upcast f : IRequestBase<'a>
 
 let onMeow context =
-    maybe {
-        let json = ApiUrl |> CatsApi.Load
-        
-        let! message = context.Update.Message
-        let file = Uri json.File |> FileToSend.Url        
-
-        let sendCat id file =
-            if json.File.EndsWith ".gif" then
-                sendDocument id file "" |> cast
-            else
-                sendPhoto id file "" |> cast
-
-        sendCat message.Chat.Id file |> execute context
-    } |> ignore
+    async {
+        sendChatAction context.Update.Message.Value.Chat.Id ChatAction.UploadPhoto |> execute context
+        let! json = ApiUrl |> CatsApi.AsyncLoad
+        maybe {
+            
+            let! message = context.Update.Message
+            
+            let file = Uri json.File |> FileToSend.Url        
+    
+            let sendCat id file =
+                if json.File.EndsWith ".gif" then
+                    sendDocument id file "" |> cast
+                else
+                    sendPhoto id file "" |> cast
+                    
+            sendCat message.Chat.Id file |> execute context
+            
+        } |> ignore
+    } |> Async.Catch |> Async.Ignore |> Async.Start
     
 let update context = 
     processCommands context [
@@ -43,7 +47,6 @@ let update context =
 
 [<EntryPoint>]
 let main argv =
-    printf "%s" argv.[0]
     match argv.Length with
     | 0 -> printf "Please specify bot token as an argument."
     | _ ->
