@@ -1,6 +1,7 @@
 ﻿module Program
 
 open System
+open System.Diagnostics
 open Funogram.Api
 open Funogram.Bot
 open Funogram.Types
@@ -21,12 +22,12 @@ let cast f = upcast f : IRequestBase<'a>
 
 let onMeow context =
     async {
-        sendChatAction context.Update.Message.Value.Chat.Id ChatAction.UploadPhoto |> execute context
+        sendChatAction context.Update.Message.Value.Chat.Id ChatAction.UploadPhoto 
+        |> execute context
+        
         let! json = ApiUrl |> CatsApi.AsyncLoad
         maybe {
-            
             let! message = context.Update.Message
-            
             let file = Uri json.File |> FileToSend.Url        
     
             let sendCat id file =
@@ -34,11 +35,13 @@ let onMeow context =
                     sendDocument id file "" |> cast
                 else
                     sendPhoto id file "" |> cast
-                    
-            sendCat message.Chat.Id file |> execute context
-            
+
+            sendCat message.Chat.Id file |> execute context 
         } |> ignore
-    } |> Async.Catch |> Async.Ignore |> Async.Start
+    } 
+    |> Async.Catch
+    |> Async.Ignore
+    |> Async.Start
     
 let update context = 
     processCommands context [
@@ -52,5 +55,5 @@ let main argv =
     | _ ->
         startBot {
             defaultConfig with Token = argv.[0]
-        } update None
+        } update None |> Async.RunSynchronously
     0

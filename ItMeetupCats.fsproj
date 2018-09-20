@@ -8,7 +8,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="ExtCore" Version="0.8.46" />
-    <PackageReference Include="FSharp.Data" Version="3.0.0-beta4" />
-    <PackageReference Include="Funogram" Version="1.2.2" />
+    <PackageReference Include="FSharp.Data" Version="2.4.6" />
+    <PackageReference Include="Funogram" Version="1.2.4" />
   </ItemGroup>
 </Project>
