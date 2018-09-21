@@ -5,9 +5,9 @@ open System.Diagnostics
 open Funogram.Api
 open Funogram.Bot
 open Funogram.Types
+open Funogram.RequestsTypes
 open FSharp.Data
 open ExtCore.Control
-open Funogram.RequestsTypes
 
 [<Literal>]
 let ApiUrl = "http://aws.random.cat/meow"
@@ -20,17 +20,16 @@ let execute context method =
 
 let cast f = upcast f : IRequestBase<'a>
 
-type BotState = { TotalSendedPics: int }
-type StatsMessageType = UpdateTotalSendedPics | StateCommand
+type BotState = { TotalSendedPics: int; TotalUsersToday: int }
+type StatsMessageType = UpdateTotalSendedPics | UpdateTotalUsers | StateCommand
 type StatsMessage = {
     Type: StatsMessageType
     Data: obj }
 
-
 let sendState context state =
     maybe {
         let! message = context.Update.Message
-        sprintf "%i 🐱 sended" state.TotalSendedPics
+        sprintf "%i 🐱 sent\n%i 👥 today" state.TotalSendedPics state.TotalUsersToday
         |> sendMessage message.Chat.Id
         |> execute context
     } |> ignore
@@ -50,22 +49,47 @@ let statsAgent = MailboxProcessor.Start(fun inbox ->
             match message.Data with
             | :? int as totalCats ->  { state with TotalSendedPics = totalCats }
             | _ -> state
+        | StatsMessageType.UpdateTotalUsers ->
+            match message.Data with
+            | :? int as totalUsers ->  { state with TotalUsersToday = totalUsers }
+            | _ -> state
+    }
+    messageLoop { TotalSendedPics = 0; TotalUsersToday = 0 })
+    
+let usersAgent = MailboxProcessor.Start(fun inbox -> 
+    let rec messageLoop state = async {
+        let! message = inbox.Receive()
+        return!
+            maybe {
+                let! message = message.Update.Message
+                let chatId = message.Chat.Id
+                
+                let state = state |> Map.add chatId DateTime.Now
+                let totalUsers = 
+                    state
+                    |> Map.filter (fun _ v -> v.Date = DateTime.Today) 
+                    |> Map.count
+                statsAgent.Post { 
+                    Type = StatsMessageType.UpdateTotalUsers
+                    Data = totalUsers }
+                
+                return state
+            }
+            |> Option.defaultValue state 
+            |> messageLoop
 
     }
-    messageLoop { TotalSendedPics = 0 }
-    )
+    Map.empty |> messageLoop)
 
-let meowAgent = MailboxProcessor.Start(fun inbox -> 
-    let rec messageLoop state = async {
-        let! context = inbox.Receive()
-        sendChatAction context.Update.Message.Value.Chat.Id ChatAction.UploadPhoto 
+let sendCat context =
+    maybe {
+        let! message = context.Update.Message
+        sendChatAction message.Chat.Id ChatAction.UploadPhoto
         |> execute context
-        
-        let! json = ApiUrl |> CatsApi.AsyncLoad
-        maybe {
-            let! message = context.Update.Message
+        async {
+            let! json = ApiUrl |> CatsApi.AsyncLoad
             let file = Uri json.File |> FileToSend.Url        
-        
+                
             let sendCat id file =
                 if json.File.EndsWith ".gif" then
                     sendDocument id file "" |> cast
@@ -73,23 +97,37 @@ let meowAgent = MailboxProcessor.Start(fun inbox ->
                     sendPhoto id file "" |> cast
 
             sendCat message.Chat.Id file |> execute context 
-        } |> ignore
+        } |> Async.Catch |> Async.Ignore |> Async.Start
+    } |> ignore
+
+let meowAgent = MailboxProcessor.Start(fun inbox -> 
+    let rec messageLoop state = async {
+        let! context = inbox.Receive()
+        sendCat context
         let newState = state + 1
         statsAgent.Post { 
-            Type = StatsMessageType.UpdateTotalSendedPics;
+            Type = StatsMessageType.UpdateTotalSendedPics
             Data = newState }
         return! messageLoop newState
     }
-    messageLoop 0
-    )
+    messageLoop 0)
 
 let onStats context =
     statsAgent.Post { 
         Type = StatsMessageType.StateCommand; 
         Data = context }
 
+let onStart context =
+    maybe {
+        let! message = context.Update.Message
+        let text = "😸 Hi! I am @MeowCatsBot.\nSend /meow to get random cat or /stats to get bot stats!"
+        sendMessage message.Chat.Id text |> execute context
+    } |> ignore
+
 let update context = 
+    usersAgent.Post context
     processCommands context [
+        cmd "/start" onStart
         cmd "/meow" meowAgent.Post
         cmd "/stats" onStats
     ] |> ignore
