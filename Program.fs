@@ -13,18 +13,19 @@ open ExtCore.Control
 let ApiUrl = "http://aws.random.cat/meow"
 type CatsApi = JsonProvider<ApiUrl>
 
+type BotState = { TotalSendedPics: int; TotalUsersToday: int }
+type StatsMessage = 
+    | UpdateTotalSendedPics of int
+    | UpdateTotalUsers of int
+    | StateCommand of UpdateContext
+
 let execute context method =
-    method |> api context.Config 
+    method
+    |> api context.Config 
     |> Async.Ignore 
     |> Async.Start
 
 let cast f = upcast f : IRequestBase<'a>
-
-type BotState = { TotalSendedPics: int; TotalUsersToday: int }
-type StatsMessageType = UpdateTotalSendedPics | UpdateTotalUsers | StateCommand
-type StatsMessage = {
-    Type: StatsMessageType
-    Data: obj }
 
 let sendState context state =
     maybe {
@@ -34,53 +35,7 @@ let sendState context state =
         |> execute context
     } |> ignore
     state
-
-let statsAgent = MailboxProcessor.Start(fun inbox ->
-    let rec messageLoop state = async {
-        let! message = inbox.Receive()
-        
-        return! messageLoop <| 
-        match message.Type with
-        | StatsMessageType.StateCommand ->
-            match message.Data with
-            | :? UpdateContext as context -> sendState context state
-            | _ -> state
-        | StatsMessageType.UpdateTotalSendedPics ->
-            match message.Data with
-            | :? int as totalCats ->  { state with TotalSendedPics = totalCats }
-            | _ -> state
-        | StatsMessageType.UpdateTotalUsers ->
-            match message.Data with
-            | :? int as totalUsers ->  { state with TotalUsersToday = totalUsers }
-            | _ -> state
-    }
-    messageLoop { TotalSendedPics = 0; TotalUsersToday = 0 })
     
-let usersAgent = MailboxProcessor.Start(fun inbox -> 
-    let rec messageLoop state = async {
-        let! message = inbox.Receive()
-        return!
-            maybe {
-                let! message = message.Update.Message
-                let chatId = message.Chat.Id
-                
-                let state = state |> Map.add chatId DateTime.Now
-                let totalUsers = 
-                    state
-                    |> Map.filter (fun _ v -> v.Date = DateTime.Today) 
-                    |> Map.count
-                statsAgent.Post { 
-                    Type = StatsMessageType.UpdateTotalUsers
-                    Data = totalUsers }
-                
-                return state
-            }
-            |> Option.defaultValue state 
-            |> messageLoop
-
-    }
-    Map.empty |> messageLoop)
-
 let sendCat context =
     maybe {
         let! message = context.Update.Message
@@ -100,22 +55,56 @@ let sendCat context =
         } |> Async.Catch |> Async.Ignore |> Async.Start
     } |> ignore
 
+let statsAgent = MailboxProcessor.Start(fun inbox ->
+    let rec messageLoop state = async {
+        let! message = inbox.Receive()
+        
+        return! messageLoop <| 
+        match message with
+        | StatsMessage.StateCommand context ->
+            sendState context state
+        | StatsMessage.UpdateTotalSendedPics totalCats ->
+            { state with TotalSendedPics = totalCats }
+        | StatsMessage.UpdateTotalUsers totalUsers -> 
+            { state with TotalUsersToday = totalUsers }
+    }
+    messageLoop { TotalSendedPics = 0; TotalUsersToday = 0 })
+    
+let usersAgent = MailboxProcessor.Start(fun inbox -> 
+    let rec messageLoop state = async {
+        let! message = inbox.Receive()
+        return!
+            maybe {
+                let! message = message.Update.Message
+                let chatId = message.Chat.Id
+                
+                let state = state |> Map.add chatId DateTime.Now
+                let totalUsers = 
+                    state
+                    |> Map.filter (fun _ v -> v.Date = DateTime.Today) 
+                    |> Map.count
+
+                StatsMessage.UpdateTotalUsers totalUsers |> statsAgent.Post
+                
+                return state
+            }
+            |> Option.defaultValue state 
+            |> messageLoop
+
+    }
+    Map.empty |> messageLoop)
+
 let meowAgent = MailboxProcessor.Start(fun inbox -> 
     let rec messageLoop state = async {
         let! context = inbox.Receive()
         sendCat context
-        let newState = state + 1
-        statsAgent.Post { 
-            Type = StatsMessageType.UpdateTotalSendedPics
-            Data = newState }
-        return! messageLoop newState
+        let state = state + 1
+        StatsMessage.UpdateTotalSendedPics state |> statsAgent.Post
+        return! messageLoop state
     }
     messageLoop 0)
 
-let onStats context =
-    statsAgent.Post { 
-        Type = StatsMessageType.StateCommand; 
-        Data = context }
+let onStats = StatsMessage.StateCommand >> statsAgent.Post
 
 let onStart context =
     maybe {
