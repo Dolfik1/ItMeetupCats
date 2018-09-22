@@ -22,12 +22,12 @@ type CacheMessage =
     | TrySendToChatFromCache of int64  
 
 type BotState = { 
-    TotalSendedPics: int
+    TotalPicsSent: int
     TotalUsersToday: int
     TotalCached: int }
  
 type StatsMessage = 
-    | UpdateTotalSendedPics of int
+    | UpdateTotalPicsSent of int
     | UpdateTotalUsers of int
     | UpdateTotalCached of int
     | StateCommand of UpdateContext
@@ -55,7 +55,7 @@ let sendState context state =
     maybe {
         let! message = context.Update.Message
         sprintf "%i 🐱 sent\n%i 👥 today\n%i 😼 cached" 
-            state.TotalSendedPics
+            state.TotalPicsSent
             state.TotalUsersToday
             state.TotalCached
         |> sendMessage message.Chat.Id
@@ -108,8 +108,8 @@ let statsAgent = MailboxProcessor.Start(fun inbox ->
         match message with
         | StatsMessage.StateCommand context ->
             sendState context state
-        | StatsMessage.UpdateTotalSendedPics totalCats ->
-            { state with TotalSendedPics = totalCats }
+        | StatsMessage.UpdateTotalPicsSent totalCats ->
+            { state with TotalPicsSent = totalCats }
         | StatsMessage.UpdateTotalUsers totalUsers ->
             { state with TotalUsersToday = totalUsers }
         | StatsMessage.UpdateTotalCached totalCached ->
@@ -117,7 +117,7 @@ let statsAgent = MailboxProcessor.Start(fun inbox ->
     }
     
     messageLoop {
-        TotalSendedPics = 0
+        TotalPicsSent = 0
         TotalUsersToday = 0
         TotalCached = 0
     })
@@ -187,7 +187,7 @@ let meowAgent = MailboxProcessor.Start(fun inbox ->
             |> catsAgent.Post
         } |> ignore
         let state = state + 1
-        StatsMessage.UpdateTotalSendedPics state |> statsAgent.Post
+        StatsMessage.UpdateTotalPicsSent state |> statsAgent.Post
         return! messageLoop state
     }
     messageLoop 0)
